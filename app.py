@@ -46,29 +46,50 @@ def distance(origin: str, destination: str) -> str:
 
     return f"Approximate distance: {km:.0f} km"
 
-
 @tool
 def weather(city: str) -> str:
     """Get current weather of a city."""
 
-    location = geo.geocode(city)
+    try:
+        location = geo.geocode(city)
 
-    if not location:
-        return "City not found."
+        if not location:
+            return "Weather unavailable: city not found."
 
-    url = (
-        f"https://api.open-meteo.com/v1/forecast?"
-        f"latitude={location.latitude}"
-        f"&longitude={location.longitude}"
-        f"&current=temperature_2m,relative_humidity_2m"
-    )
+        url = "https://api.open-meteo.com/v1/forecast"
 
-    data = requests.get(url, timeout=10).json()["current"]
+        params = {
+            "latitude": location.latitude,
+            "longitude": location.longitude,
+            "current": "temperature_2m,relative_humidity_2m",
+            "timezone": "auto"
+        }
 
-    return (
-        f"Temperature: {data['temperature_2m']}°C, "
-        f"Humidity: {data['relative_humidity_2m']}%"
-    )
+        response = requests.get(
+            url,
+            params=params,
+            timeout=10
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        if "current" not in data:
+            return "Weather information is temporarily unavailable."
+
+        current = data["current"]
+
+        temperature = current.get("temperature_2m")
+        humidity = current.get("relative_humidity_2m")
+
+        return (
+            f"Current weather in {city}: "
+            f"{temperature}°C, humidity {humidity}%."
+        )
+
+    except Exception:
+        return "Weather information is temporarily unavailable."
 
 
 @tool
