@@ -1,0 +1,9 @@
+flask
+gunicorn
+requests
+python-dotenv
+geopy
+langchain
+langchain-google-genai
+langchain-community
+ddgs
