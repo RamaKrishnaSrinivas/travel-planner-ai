@@ -1,7 +1,9 @@
 import os
 import requests
+
 from flask import Flask, request, render_template_string
 from dotenv import load_dotenv
+
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
 
@@ -10,48 +12,90 @@ from langchain_community.tools import DuckDuckGoSearchResults
 from langchain.tools import tool
 from langchain.agents import create_agent
 
+
+# ============================================================
+# ENVIRONMENT
+# ============================================================
+
 load_dotenv()
 
-# -----------------------------
-# Gemini
-# -----------------------------
+
+# ============================================================
+# GEMINI
+# ============================================================
 
 llm = ChatGoogleGenerativeAI(
-    model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
+    model=os.getenv(
+        "GEMINI_MODEL",
+        "gemini-3.1-flash-lite"
+    ),
+    temperature=0.3
 )
 
-# -----------------------------
-# Tools
-# -----------------------------
 
-search = DuckDuckGoSearchResults(num_results=5)
+# ============================================================
+# TOOLS
+# ============================================================
 
-geo = Nominatim(user_agent="travel-planner-ai")
+search = DuckDuckGoSearchResults(
+    num_results=5
+)
 
+
+geo = Nominatim(
+    user_agent="travel-planner-ai",
+    timeout=10
+)
+
+
+# ============================================================
+# DISTANCE TOOL
+# ============================================================
 
 @tool
 def distance(origin: str, destination: str) -> str:
-    """Calculate distance between two places in km."""
+    """Calculate approximate distance between two places in kilometers."""
 
-    a = geo.geocode(origin)
-    b = geo.geocode(destination)
+    try:
 
-    if not a or not b:
-        return "Location not found."
+        a = geo.geocode(
+            origin,
+            timeout=10
+        )
 
-    km = geodesic(
-        (a.latitude, a.longitude),
-        (b.latitude, b.longitude)
-    ).km
+        b = geo.geocode(
+            destination,
+            timeout=10
+        )
 
-    return f"Approximate distance: {km:.0f} km"
+        if not a or not b:
+            return "Distance unavailable: location not found."
+
+        km = geodesic(
+            (a.latitude, a.longitude),
+            (b.latitude, b.longitude)
+        ).km
+
+        return f"Approximate distance: {km:.0f} km"
+
+    except Exception:
+        return "Distance information is temporarily unavailable."
+
+
+# ============================================================
+# WEATHER TOOL
+# ============================================================
 
 @tool
 def weather(city: str) -> str:
-    """Get current weather of a city."""
+    """Get current weather information for a city."""
 
     try:
-        location = geo.geocode(city)
+
+        location = geo.geocode(
+            city,
+            timeout=10
+        )
 
         if not location:
             return "Weather unavailable: city not found."
@@ -61,7 +105,10 @@ def weather(city: str) -> str:
         params = {
             "latitude": location.latitude,
             "longitude": location.longitude,
-            "current": "temperature_2m,relative_humidity_2m",
+            "current": (
+                "temperature_2m,"
+                "relative_humidity_2m"
+            ),
             "timezone": "auto"
         }
 
@@ -80,17 +127,27 @@ def weather(city: str) -> str:
 
         current = data["current"]
 
-        temperature = current.get("temperature_2m")
-        humidity = current.get("relative_humidity_2m")
+        temperature = current.get(
+            "temperature_2m"
+        )
+
+        humidity = current.get(
+            "relative_humidity_2m"
+        )
 
         return (
             f"Current weather in {city}: "
-            f"{temperature}°C, humidity {humidity}%."
+            f"{temperature}°C, "
+            f"humidity {humidity}%."
         )
 
     except Exception:
         return "Weather information is temporarily unavailable."
 
+
+# ============================================================
+# BUDGET CALCULATOR
+# ============================================================
 
 @tool
 def calculator(
@@ -103,15 +160,27 @@ def calculator(
 ) -> str:
     """Calculate estimated travel budget in Indian Rupees."""
 
-    total = (
-        hotel
-        + food
-        + transport
-        + activities
-    ) * days * people
+    try:
 
-    return f"Estimated budget: ₹{total:,.0f}"
+        total = (
+            hotel
+            + food
+            + transport
+            + activities
+        ) * days * people
 
+        return (
+            f"Estimated budget: "
+            f"₹{total:,.0f}"
+        )
+
+    except Exception:
+        return "Budget calculation is unavailable."
+
+
+# ============================================================
+# TOOL LIST
+# ============================================================
 
 tools = [
     search,
@@ -120,38 +189,59 @@ tools = [
     calculator
 ]
 
-# -----------------------------
-# Agent
-# -----------------------------
+
+# ============================================================
+# AI AGENT
+# ============================================================
 
 prompt = """
 You are a Travel Planner AI Agent.
 
-For every travel request provide:
+Create a useful and beginner-friendly travel plan.
 
-1. Trip summary
+For every travel request try to provide:
+
+1. Trip Summary
 2. Distance
-3. Current weather
-4. Five popular places
-5. Day-by-day itinerary
-6. Estimated budget
-7. Travel tips
+3. Current Weather
+4. Five Popular Places
+5. Day-by-Day Itinerary
+6. Estimated Budget
+7. Travel Tips
 
-Use the available tools.
+TOOL RULES:
 
-Use web search for popular places.
-Use distance for travel distance.
-Use weather for current weather.
-Use calculator for budget.
+- Use web search for popular places.
+- Use the distance tool for travel distance.
+- Use the weather tool for current weather.
+- Use the calculator for estimated budget.
 
-For Indian trips use Indian Rupees.
+If a tool is temporarily unavailable,
+DO NOT stop the entire travel plan.
+
+Instead, continue the plan and write:
+
+"Information temporarily unavailable."
+
+For Indian trips, use Indian Rupees.
 
 Return ONLY clean, readable text.
-Do not show JSON, dictionaries, metadata,
-tool calls or internal information.
+
+Do NOT show:
+
+- JSON
+- dictionaries
+- metadata
+- tool calls
+- function calls
+- internal information
+- Python code
+
+Use simple headings and bullet points.
 
 Keep the answer useful and beginner-friendly.
 """
+
 
 agent = create_agent(
     model=llm,
@@ -160,114 +250,180 @@ agent = create_agent(
 )
 
 
-# -----------------------------
-# Travel function
-# -----------------------------
+# ============================================================
+# TRAVEL FUNCTION
+# ============================================================
 
-def travel(question):
+def travel(question: str) -> str:
 
-    result = agent.invoke({
-        "messages": [
+    try:
+
+        result = agent.invoke(
             {
-                "role": "user",
-                "content": question
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": question
+                    }
+                ]
             }
-        ]
-    })
+        )
 
-    for message in reversed(result["messages"]):
+        messages = result.get(
+            "messages",
+            []
+        )
 
-        if message.__class__.__name__ != "AIMessage":
-            continue
+        for message in reversed(messages):
 
-        content = message.content
+            if message.__class__.__name__ != "AIMessage":
+                continue
 
-        if isinstance(content, str):
-            return content
+            content = message.content
 
-        if isinstance(content, list):
+            # Normal text response
+            if isinstance(content, str):
 
-            text = []
+                if content.strip():
+                    return content.strip()
 
-            for item in content:
+            # Gemini sometimes returns a list
+            if isinstance(content, list):
 
-                if isinstance(item, str):
-                    text.append(item)
+                text = []
 
-                elif isinstance(item, dict):
-                    if item.get("type") == "text":
-                        text.append(item.get("text", ""))
+                for item in content:
 
-            answer = "\n".join(text).strip()
+                    if isinstance(item, str):
+                        text.append(item)
 
-            if answer:
-                return answer
+                    elif isinstance(item, dict):
 
-    return "No travel plan was generated."
+                        if item.get("type") == "text":
+
+                            value = item.get(
+                                "text",
+                                ""
+                            )
+
+                            if value:
+                                text.append(value)
+
+                answer = "\n".join(
+                    text
+                ).strip()
+
+                if answer:
+                    return answer
+
+        return "No travel plan was generated."
+
+    except Exception as e:
+
+        print(
+            "Travel planning error:",
+            repr(e)
+        )
+
+        return (
+            "Sorry, I could not create the "
+            "travel plan right now. "
+            "Please try again in a few seconds."
+        )
 
 
-# -----------------------------
-# Flask Web App
-# -----------------------------
+# ============================================================
+# FLASK APP
+# ============================================================
 
 app = Flask(__name__)
 
 
+# ============================================================
+# HTML
+# ============================================================
+
 HTML = """
 <!DOCTYPE html>
+
 <html>
 
 <head>
 
 <title>Travel Planner AI</title>
 
+<meta name="viewport"
+      content="width=device-width, initial-scale=1">
+
 <style>
 
 body {
-    font-family: Arial;
+    font-family: Arial, sans-serif;
     max-width: 900px;
     margin: 40px auto;
     padding: 20px;
     background: #f5f5f5;
+    color: #222;
 }
 
 h1 {
     text-align: center;
 }
 
+.description {
+    text-align: center;
+    color: #555;
+}
+
 textarea {
     width: 100%;
-    height: 100px;
-    padding: 10px;
+    height: 120px;
+    padding: 12px;
     font-size: 16px;
+    box-sizing: border-box;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    resize: vertical;
 }
 
 button {
-    margin-top: 10px;
+    margin-top: 12px;
     padding: 12px 25px;
     font-size: 16px;
     cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    background: #222;
+    color: white;
+}
+
+button:hover {
+    background: #444;
 }
 
 .result {
     margin-top: 30px;
-    padding: 20px;
+    padding: 25px;
     background: white;
     border-radius: 8px;
+    line-height: 1.6;
     white-space: pre-wrap;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
 
 </style>
 
 </head>
 
+
 <body>
 
 <h1>✈️ Travel Planner AI</h1>
 
-<p>
+<p class="description">
 Ask the AI to create your travel plan.
 </p>
+
 
 <form method="POST">
 
@@ -285,6 +441,7 @@ Create Travel Plan
 
 </form>
 
+
 {% if answer %}
 
 <div class="result">
@@ -295,13 +452,21 @@ Create Travel Plan
 
 {% endif %}
 
+
 </body>
 
 </html>
 """
 
 
-@app.route("/", methods=["GET", "POST"])
+# ============================================================
+# HOME PAGE
+# ============================================================
+
+@app.route(
+    "/",
+    methods=["GET", "POST"]
+)
 def home():
 
     answer = ""
@@ -309,10 +474,16 @@ def home():
 
     if request.method == "POST":
 
-        question = request.form.get("question", "")
+        question = request.form.get(
+            "question",
+            ""
+        ).strip()
 
         if question:
-            answer = travel(question)
+
+            answer = travel(
+                question
+            )
 
     return render_template_string(
         HTML,
@@ -321,13 +492,18 @@ def home():
     )
 
 
-# -----------------------------
-# Local testing
-# -----------------------------
+# ============================================================
+# LOCAL / RENDER SERVER
+# ============================================================
 
 if __name__ == "__main__":
 
     app.run(
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", 5000))
+        port=int(
+            os.environ.get(
+                "PORT",
+                5000
+            )
+        )
     )
